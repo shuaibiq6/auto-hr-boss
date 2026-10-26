@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "boss-hr-outreach": {
+      "command": "node",
+      "args": ["<引擎解压后的绝对路径>/boss-hr-outreach-safe/mcp/server.mjs"],
+      "env": {
+        "BOSS_MCP_HOME": "C:/Users/<你的用户名>/.boss-hr-outreach"
+      }
+    }
+  }
+}

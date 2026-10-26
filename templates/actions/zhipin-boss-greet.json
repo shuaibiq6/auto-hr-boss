@@ -1,0 +1,63 @@
+{
+  "_comment": "动作模板：BOSS 直聘 · 招聘端 · 推荐牛人 · 批量打招呼。选择器基于 2026-09-29/30 实测；站点改版后需按 SKILL.md 的『首次执行必做：结构探测』更新本文件。",
+  "site": "zhipin.com",
+  "role": "recruiter",
+  "title": "推荐牛人 · 批量打招呼",
+
+  "entryUrl": "https://www.zhipin.com/web/chat/recommend",
+  "pageMatch": "zhipin.com",
+  "frameMatch": "/frame/recommend/",
+
+  "card": {
+    "_comment": "root 是 click/hover 的定位根。注意：打招呼按钮与 .card-inner 是『兄弟』关系，不在 .card-inner 内部——实测后代选择器 `.card-inner[data-geekid=X] .btn-greet` 命中 0 个，必须用 :has() 从卡片根定位。",
+    "inner": ".card-inner[data-geekid=\"{id}\"]",
+    "root": ".geek-card-small:has(.card-inner[data-geekid=\"{id}\"])",
+    "box": ".geek-card-small",
+    "name": ".name"
+  },
+
+  "greetBtn": ".btn-greet",
+  "continueBtn": ".btn-continue",
+
+  "counters": {
+    "greet": ".btn-greet",
+    "card": ".card-inner[data-geekid]"
+  },
+
+  "modal": {
+    "container": ".dialog-wrap",
+    "dismissTexts": ["知道了", "关闭", "取消"]
+  },
+
+  "successSignals": {
+    "continueTexts": ["继续沟通", "继续聊"],
+    "modalAppearsMeansSent": true,
+    "counterDropMeansSent": true
+  },
+
+  "verify": {
+    "pollSeconds": 15,
+    "pollSecondsRetry": 10,
+    "intervalMs": 800
+  },
+
+  "preClick": {
+    "hoverCard": true,
+    "hoverPauseMs": [700, 1800]
+  },
+
+  "riskProbe": {
+    "captchaSelectors": "[class*=geetest],[class*=captcha],[id*=captcha],[class*=verify-]",
+    "quizTexts": ["请回答", "答题", "异常操作"],
+    "freqTexts": ["操作过于频繁", "次数已用完", "已达上限", "今日沟通次数"],
+    "loginWallUrlPart": "/web/user/",
+    "loginWallTexts": ["请登录"]
+  },
+
+  "scroll": {
+    "mode": "frame",
+    "comment": "推荐流是追加式滚动：滚到底后列表会追加新卡片。iframe 内滚动必须用 contentWindow.scrollTo()，用 /wheel 打顶层文档无效。",
+    "maxSteps": 80,
+    "settleMs": 900
+  }
+}

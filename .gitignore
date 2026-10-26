@@ -1,0 +1,12 @@
+# 运行时状态 / 用户偏好（不入库）
+config.env
+_tid.txt
+*.log
+*.tmp-*
+*.lock
+
+# 依赖
+node_modules/
+
+# 本地状态根（若误设到仓库内）
+.boss-hr-outreach/

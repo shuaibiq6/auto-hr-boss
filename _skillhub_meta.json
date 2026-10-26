@@ -1,0 +1,19 @@
+{
+  "name": "BOSS 招聘触达 · 安全版",
+  "source": "local",
+  "version": "2.10.0",
+  "note": "BOSS 招聘触达安全版（本地独立维护）。2.7.1：触达结果可信性修复（假成功根因 + 平台侧核验 + 页面偏离看门狗 + 增量回写）。2.8.0：长任务抗中断（批次守护 run-until-done + 状态查询 status + 进度心跳/完成哨兵/--resume/--chunk/单实例锁 + start-session 端口占用自愈）。2.8.1：真机检验后修正（status --wait 前台有界等待；--resume 改多源合成；--respect-window 按预计时刻判定；ts 改本地时间）。2.8.2：根因取证（现象记录，结论已被 2.8.3 的对照实验否证）。2.8.3：被杀无感加固（新增 watchdog.mjs 守夜人 + detach.mjs 脱离启动器；greet-batch 断管免疫 + 终止原因留痕 + 进度改计划视角；status 修 runEnded 漏括号并展示守夜人；run-until-done 加 --detach）。2.8.4：status 显示修正（分块运行时按 updatedAt 取最新状态，不再误读上一块的完成哨兵）。",
+  "examples_zh": [
+    "在 BOSS 直聘推荐牛人里按匹配度筛选候选人并批量打招呼",
+    "按日 150 安全排班跑完今天的招聘触达指标",
+    "读取招聘端对话列表与候选人简历"
+  ],
+  "examples_en": [
+    "Screen and greet BOSS Zhipin candidates in bulk",
+    "Run the daily-150 safe outreach schedule",
+    "Read recruiter chat list and candidate resumes"
+  ],
+  "description_zh": "BOSS 招聘端批量触达加固版：日 150 安全排班、准入闸门、风控熔断，CDP 直连本地浏览器",
+  "description_en": "Hardened BOSS recruiter outreach: daily-150 pacing, screening gate, risk guardrails",
+  "iconLocalPath": "C:\\Users\\liuho\\.workbuddy\\skills\\boss-hr-outreach-safe\\_icon.svg"
+}
