@@ -396,10 +396,9 @@ live 前置 dry 凭证（未 dry 返回 `E_DRY_REQUIRED`）。
 
 ### 移除
 
-- **`.claude-plugin/`（`plugin.json` + `marketplace.json`）** —— Claude Code 插件清单，WorkBuddy 不读取，
-  已删除（对照：用户自建 skill 均无此目录）。
-- **`_skillhub_meta.json` 中的 `skillId` / `source: marketplace`** —— 解除与市场安装的绑定，
-  避免市场同步覆盖本包改动。
+- **插件清单目录（`plugin.json` + `marketplace.json`）** —— 本站工具以 Skill + MCP 子包形态交付，
+  该清单不会被读取，已删除。
+- **`_skillhub_meta.json` 中的 `skillId`** —— 解除外部同步绑定，避免覆盖本包改动。
 
 ---
 
