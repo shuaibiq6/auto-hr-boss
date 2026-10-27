@@ -35,10 +35,11 @@ export const PROMPTS = [
 export function getPrompt(name, args = {}) {
   const p = PROMPTS.find((x) => x.name === name);
   if (!p) return null;
-  const profile = args.profile || 'hr150';
-  const mode = args.mode || 'dry';
-  const limit = args.limit || '（以 screen_talent 的 accepted 数量为准）';
-  const jobId = args.jobId || '<job_id>';
+  // T4-7：剧本参数校验（mode 白名单 / profile 字符集 / limit 数字 / jobId 剥除非法字符），防参数注入提示词
+  const mode = args.mode === 'live' ? 'live' : 'dry';
+  const profile = /^[a-z0-9_]+$/.test(String(args.profile || '')) ? String(args.profile) : 'hr150';
+  const limit = /^\d{1,4}$/.test(String(args.limit || '')) ? String(args.limit) : '（以 screen_talent 的 accepted 数量为准）';
+  const jobId = String(args.jobId || '').replace(/[^A-Za-z0-9_-]/g, '') || '<job_id>';
 
   const scripts = {
     'daily-150-run': `你正在执行 BOSS 招聘端「单日 150 触达」流程。严格按顺序执行，任何一步被 Server 拒绝都停下并向用户说明原因（不要试图绕过）。

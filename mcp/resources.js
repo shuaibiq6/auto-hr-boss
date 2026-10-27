@@ -110,7 +110,7 @@ export async function readResource(uri) {
   if (jobMatch) {
     const jobId = decodeURIComponent(jobMatch[1]);
     const job = readJob(jobId);
-    if (!job) return { uri, mimeType: 'application/json', text: JSON.stringify({ error: 'E_JOB_NOT_FOUND', job_id: jobId }, null, 2) };
+    if (!job) throw { rpcCode: -32002, message: `Resource not found: ${uri}`, data: { code: 'E_JOB_NOT_FOUND', job_id: jobId } };
     const { exit, engine } = await fetchEngineStatus(jobId, { wait: 0, health: true });
     const proj = projectStatus(job, engine, exit);
     return { uri, mimeType: 'application/json', text: JSON.stringify({ job_id: jobId, status: proj.status, progress: proj.progress, counts: proj.counts, watchdog: proj.watchdog, breaker_open: proj.breaker_open }, null, 2) };
@@ -142,9 +142,10 @@ export async function readResource(uri) {
     const qIdx = uri.indexOf('?');
     const q = qIdx >= 0 ? new URLSearchParams(uri.slice(qIdx + 1)) : new URLSearchParams();
     const recent = Number(q.get('recent') || 100);
-    const rows = readTouch().slice(-recent);
-    return { uri, mimeType: 'application/json', text: JSON.stringify({ total: readTouch().length, rows }, null, 2) };
+    const all = readTouch(); // T5-3：一次读盘（原先 slice 与 length 各读一次）
+    const rows = all.slice(-recent);
+    return { uri, mimeType: 'application/json', text: JSON.stringify({ total: all.length, rows }, null, 2) };
   }
 
-  return { uri, mimeType: 'text/plain', text: `未知资源：${uri}` };
+  throw { rpcCode: -32002, message: `Resource not found: ${uri}` };
 }

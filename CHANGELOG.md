@@ -5,6 +5,33 @@
 
 ---
 
+## 2.11.0 — 2026-10-27 · 稳定性与配额覆盖（T4/T5 优化）
+
+> 目标：稳定运行、连接不掉、每天完整覆盖 150 额度。核心功能与 11 个安全强制点不变，全部改动集中在 `mcp/` 薄壳层，引擎 `scripts/` 一行不改。
+
+### 协议正确性（连接不掉的关键）
+- **错误码合规（T4-4）**：非法 JSON 帧回 `-32700`；缺 method / 显式 `id:null` / 非对象值回 `-32600`；`resources/read` 未知 URI 或 job 不存在回 `-32002`（此前静默丢弃或回 200 文本）。
+- **初始化闸门（T4-8）**：`initialize` 前仅放行 `initialize` / `ping`，其余回 `-32003`。
+- **进度通知（T4-5）**：请求带 `_meta.progressToken` 时，引擎长任务期间每 5s 心跳 `notifications/progress`，避免客户端 60s 超时掉线。
+- **剧本参数校验（T4-7）**：prompt 的 mode 白名单、profile/limit 字符集、jobId 剥离非法字符，防提示词注入。
+
+### 并发正确性（150 额度不漏记/不超发）
+- **账号级互斥闭合 TOCTOU（T4-1）**：live job 的「互斥复核 + starting 占位」收进账号级文件锁，彻底消除「检查→提交」之间的竞态窗口（fast-fail 前置检查保留，确定性拒绝路径不变）。
+- **写入临时文件唯一化（T4-2）**：`writeJson` 临时名由 `pid` 升级为 `pid + 随机 4 字节`，多进程并发写同一文件不再互踩。
+
+### 性能（轮询热路径减负）
+- **日志缓冲（T5-2）**：文件日志改为内存缓冲 + 500ms 定时 flush + 退出前强制 flush，避免每请求多次 `appendFileSync` 阻塞事件循环。
+- **解码字节偏移扫描（T5-4）**：`decodeFrames` 用 `Buffer.indexOf(0x0A)` 字节扫描，避免整 Buffer 反复 `toString`。
+- **触达统计一次读盘（T5-3 部分）**：新增 `readTouchStats` 一次解析 touch.json 供去重/闸门/统计共用；`findCurrentJob` 与 `resources/read` 消除重复 `listJobs`/`readTouch`。
+- **统计健壮性（T5-5）**：`by_direction` 不再回退到 job 字段；`commitTouch` 拒绝无 id/url 的记录（无法去重）。
+
+### 测试
+- 新增 T4-4/T4-7/T5-4/T5-5 契约断言（坏帧归集、-32002、prompt 注入防护、Content-Length 回退、无键拒绝），65 → 78。
+
+> 尚未纳入本轮：`outputSchema`（T4-3）、分页游标（T4-6）、status 直读进度文件（T5-1）、30 天 job 归档（T5-3 归档）——均为优化项，不阻塞稳定性目标，留待后续。
+
+---
+
 ## 2.10.0 — 2026-10-26 · MCP 规范化（传输/取消/元数据/并发锁）
 
 > 把 `mcp/` 子包从「能跑」提升为「规范、可被任意 MCP 客户端稳定驱动」。核心功能与安全边界不变。

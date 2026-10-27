@@ -18,11 +18,16 @@ import { RESOURCES, RESOURCE_TEMPLATES, readResource } from './resources.js';
 import { PROMPTS, getPrompt } from './prompts.js';
 import { createSender, decodeFrames } from './transport.mjs';
 
-const SERVER_INFO = { name: 'boss-hr-outreach', version: '1.1.0' };
+const SERVER_INFO = { name: 'boss-hr-outreach', version: '1.3.0' };
 const SUPPORTED_PROTOCOL = ['2024-11-05', '2025-03-26', '2025-06-18', '2026-07-28'];
 const CAPABILITIES = { tools: {}, resources: { subscribe: false, listChanged: false }, prompts: { listChanged: false } };
 
 const send = createSender(log);
+
+// T4-5：进度通知（长任务心跳，避免客户端 60s 超时掉线）
+function sendProgress(progressToken, progress, total) {
+  send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken, progress, total } });
+}
 
 // ─────────────────────────────────────────────────────────── 入站帧循环
 let buf = Buffer.alloc(0);
@@ -31,6 +36,11 @@ process.stdin.on('data', (chunk) => {
   let parsed;
   while ((parsed = decodeFrames(buf))) {
     buf = parsed.rest;
+    // T4-4：非空但无法解析的帧 → -32700（Parse error）
+    for (const raw of parsed.badFrames) {
+      log('bad frame', raw.slice(0, 200));
+      send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+    }
     if (!parsed.messages.length) break;
     for (const msg of parsed.messages) void handleMessage(msg);
   }
@@ -39,12 +49,23 @@ process.stdin.on('end', () => { log('stdin 关闭，退出'); process.exit(0); }
 
 // ─────────────────────────────────────────────────────────── 请求取消（MCP notifications/cancelled）
 const activeRequests = new Map(); // id(string) → { controller }
+let initialized = false; // T4-8：initialize 前拒绝其它方法（-32003）
 
 async function handleMessage(msg) {
-  const { method, id, params } = msg || {};
-  if (!method) return;
+  // T4-4：非对象 JSON 值（null / 数字 / 数组等）→ -32600 无效请求
+  if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
+    send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
+    return;
+  }
+  const { method, id, params } = msg;
+  if (!method) {
+    // 缺少 method → -32600（带 id 时原样回 id）
+    if (id !== undefined && id !== null) send({ jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid Request: missing method' } });
+    else if (id === null) send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
+    return;
+  }
 
-  if (id === undefined || id === null) {
+  if (id === undefined) {
     // 通知（无需响应）
     if (method === 'notifications/cancelled') {
       const requestId = String((params && params.requestId) ?? '');
@@ -55,11 +76,24 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (id === null) {
+    // 显式 null id → -32600
+    send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
+    return;
+  }
+
+  // T4-8：initialize 前仅放行 initialize / ping（其余回 -32003）
+  if (!initialized && method !== 'initialize' && method !== 'ping') {
+    send({ jsonrpc: '2.0', id, error: { code: -32003, message: 'Server not initialized' } });
+    return;
+  }
+
   const controller = new AbortController();
   activeRequests.set(String(id), { controller });
   try {
-    // 用 AsyncLocalStorage 把 signal 带入底层 runNode（引擎子进程被 SIGTERM 终止）
-    const result = await reqCtx.run({ signal: controller.signal }, () => dispatch(method, params || {}));
+    // 用 AsyncLocalStorage 把 signal + 进度令牌带入底层 runNode（引擎子进程可被 SIGTERM 终止 / 长任务心跳）
+    const progressToken = params && params._meta && params._meta.progressToken;
+    const result = await reqCtx.run({ signal: controller.signal, progressToken, sendProgress }, () => dispatch(method, params || {}));
     send({ jsonrpc: '2.0', id, result });
   } catch (e) {
     send({ jsonrpc: '2.0', id, error: toRpcError(e) });
@@ -78,6 +112,7 @@ async function dispatch(method, params) {
   switch (method) {
     case 'initialize': {
       const requested = params && params.protocolVersion;
+      initialized = true; // T4-8：initialize 完成，放行后续方法
       // T2-3：客户端协议未命中时回落到最新支持的版本，而非最旧
       const protocolVersion = SUPPORTED_PROTOCOL.includes(requested) ? requested : SUPPORTED_PROTOCOL[SUPPORTED_PROTOCOL.length - 1];
       log('initialize', 'client protocol=', requested, '→', protocolVersion);

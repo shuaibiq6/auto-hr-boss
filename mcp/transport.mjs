@@ -22,45 +22,39 @@ export function createSender(log) {
   };
 }
 
-function tryParse(s) {
-  const t = String(s == null ? '' : s).trim();
-  if (!t) return null;
-  try { return JSON.parse(t); } catch { return null; }
-}
-
 /**
- * 从累积 Buffer 中尽可能多地解析出完整帧。
- * @returns {{ messages: Array, rest: Buffer }}
- *   messages：本次新解析出的完整消息；rest：剩余未完整的字节。
+ * 从累积 Buffer 中尽可能多地解析出完整帧（字节偏移扫描，避免大 Buffer 全量 toString，T5-4）。
+ * @returns {{ messages: Array, rest: Buffer, badFrames: Array }}
+ *   messages：本次新解析出的完整消息；
+ *   badFrames：非空但 JSON 解析失败的原始行（协议层应按 -32700 应答，T4-4）；
+ *   rest：剩余未完整的字节。
  */
 export function decodeFrames(buffer) {
   const messages = [];
+  const badFrames = [];
   let rest = buffer;
   for (;;) {
-    const s = rest.toString('utf8');
-    // 兼容：Content-Length 头（历史 LSP 风格帧）
-    const header = s.match(/^Content-Length:\s*(\d+)\r?\n\r?\n/);
+    // 兼容：Content-Length 头（历史 LSP 风格帧）——只转 64 字节前缀判定，避免整 Buffer toString
+    const header = rest.subarray(0, 64).toString('utf8').match(/^Content-Length:\s*(\d+)\r?\n\r?\n/);
     if (header) {
       const headerLen = header[0].length;
       const bodyLen = Number(header[1]);
       if (rest.length >= headerLen + bodyLen) {
-        const body = rest.subarray(headerLen, headerLen + bodyLen);
+        const raw = rest.subarray(headerLen, headerLen + bodyLen).toString('utf8');
         rest = rest.subarray(headerLen + bodyLen);
-        const msg = tryParse(body.toString('utf8'));
-        if (msg) messages.push(msg);
+        if (raw.trim()) { try { messages.push(JSON.parse(raw)); } catch { badFrames.push(raw); } }
         continue;
       }
-      return { messages, rest };
+      return { messages, rest, badFrames };
     }
-    // 标准：换行分隔
-    const nl = s.indexOf('\n');
+    // 标准：换行分隔（0x0A 字节扫描）
+    const nl = rest.indexOf(0x0a);
     if (nl !== -1) {
-      const line = s.slice(0, nl);
+      const raw = rest.subarray(0, nl).toString('utf8').trim();
       rest = rest.subarray(nl + 1);
-      const msg = tryParse(line);
-      if (msg) messages.push(msg);
+      if (raw) { try { messages.push(JSON.parse(raw)); } catch { badFrames.push(raw); } }
       continue;
     }
-    return { messages, rest };
+    return { messages, rest, badFrames };
   }
 }

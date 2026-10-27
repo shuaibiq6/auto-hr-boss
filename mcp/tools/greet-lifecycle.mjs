@@ -30,7 +30,8 @@ export const greetStatus = {
     },
   },
   async handler(args = {}) {
-    const jobId = args.job_id || (findCurrentJob() && findCurrentJob().job_id);
+    const current = findCurrentJob(); // T5-3：避免对 findCurrentJob 重复调用（内部每次 listJobs 读盘）
+    const jobId = args.job_id || (current && current.job_id);
     if (!jobId) return errResult('E_JOB_NOT_FOUND', '无 job（先跑 boss_greet_start）');
     const job = readJob(jobId);
     if (!job) return errResult('E_JOB_NOT_FOUND', `job 不存在：${jobId}`);

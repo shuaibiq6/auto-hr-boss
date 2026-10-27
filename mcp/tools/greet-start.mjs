@@ -7,9 +7,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { runNode, ok, errResult, PATHS, localStamp } from '../lib.mjs';
+import { runNode, ok, errResult, PATHS, localStamp, withFileLockSync } from '../lib.mjs';
 import {
-  newJobId, loadConfig, touchIds, touchTodayCount,
+  newJobId, loadConfig, readTouchStats,
   isBreakerOpenToday, readBreaker, findActiveLiveJob, resolvePlan, jobDir, jobOut, jobPlanFile, writeJob,
   planHashOf, writeAttestPlan, requireDryAttest,
 } from '../state.mjs';
@@ -75,8 +75,8 @@ export const greetStart = {
     // 强制点 #5：名单校验 + 交叉去重
     const plan = resolvePlan(args.plan);
     if (!Array.isArray(plan) || !plan.length) return errResult('E_BAD_INPUT', 'plan 为空或格式非法', null, '先跑 boss_screen_talent 生成 plan，或传内联数组');
-    const touched = touchIds();
-    const alreadyTouched = plan.filter((t) => t && touched.has(String(t.id || t.url || ''))).length;
+    const touchStats = readTouchStats(); // T5-3：一次读盘，供去重与闸门共用
+    const alreadyTouched = plan.filter((t) => t && touchStats.ids.has(String(t.id || t.url || ''))).length;
     const limit = Math.min(limitRaw ?? plan.length, plan.length, 150);
     const hash = planHashOf(plan);
     const respectWindow = !!args.respect_window;
@@ -90,26 +90,40 @@ export const greetStart = {
     // 强制点 #4：闸门（live 必过）
     let gateResult = null;
     if (mode === 'live') {
-      const todayTouched = touchTodayCount();
+      const todayTouched = touchStats.today;
       gateResult = gate(profile, { todayTouched });
       if (!gateResult.allowed) {
         return errResult('E_GATE_DENIED', `闸门拒绝：${gateResult.reasons.join('；')}`, gateResult, '等待进入允许时段 / 次日再试；不压缩间隔');
       }
     }
 
-    // 建 job
+    // 建 job（T4-1：live 在账号级锁内「互斥复核 + starting 占位」，闭合「检查→提交」之间的 TOCTOU）
     const jobId = newJobId();
     const dir = jobDir(jobId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(jobPlanFile(jobId), JSON.stringify(plan, null, 2), 'utf8');
-
     const jobName = args.job_name || jobId;
-    const job = writeJob(jobId, {
-      status: 'starting', mode, profile: profileName, chunk, limit,
-      plan_total: plan.length, already_touched: alreadyTouched, will_process: limit,
-      plan_file: jobPlanFile(jobId), job_name: args.job_name || null,
-      created_at: localStamp(), detach: null,
-    });
+    const createJob = () => {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(jobPlanFile(jobId), JSON.stringify(plan, null, 2), 'utf8');
+      return writeJob(jobId, {
+        status: 'starting', mode, profile: profileName, chunk, limit,
+        plan_total: plan.length, already_touched: alreadyTouched, will_process: limit,
+        plan_file: jobPlanFile(jobId), job_name: args.job_name || null,
+        created_at: localStamp(), detach: null,
+      });
+    };
+
+    let job;
+    if (mode === 'live') {
+      const locked = withFileLockSync(path.join(PATHS.jobs, 'live.lock'), () => {
+        const active = findActiveLiveJob();
+        if (active) return { blocked: active };
+        return { job: createJob() };
+      });
+      if (locked.blocked) return errResult('E_JOB_ACTIVE', `已有活动 live job（${locked.blocked.job_id}）`, { active_job_id: locked.blocked.job_id }, '先 boss_greet_status / boss_greet_stop 再启动');
+      job = locked.job;
+    } else {
+      job = createJob();
+    }
 
     // 组装 detach 命令（强制点 #7 respect_window 默认关=连续跑完；#9 --commit 恒开）
     const detachArgs = [

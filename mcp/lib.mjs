@@ -16,6 +16,7 @@ import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 
 // ─────────────────────────────────────────────────────────── 引擎位置（单一事实源）
 export const MCP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -77,15 +78,28 @@ if (_missing.length) {
 }
 
 // ─────────────────────────────────────────────────────────── 日志（R-05：stderr + 文件，绝不写 stdout）
-let logReady = false;
+// T5-2：文件写入改为内存缓冲 + 定时 flush（500ms）+ 退出前强制 flush，
+//       避免在热路径（每请求多行日志）反复 appendFileSync 阻塞事件循环 → 客户端超时掉线。
+//       stderr 仍即时写（非阻塞，Host 排障依赖），仅磁盘文件走缓冲。
+let logBuf = [];
+let logTimer = null;
+function flushLogs() {
+  if (!logBuf.length) return;
+  const chunk = logBuf.join('\n') + '\n';
+  logBuf = [];
+  try { ensureHome(); fs.appendFileSync(PATHS.serverLog, chunk); } catch { /* ignore */ }
+}
 export function log(...args) {
   const line = `[${localTime()}] ${args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`;
   try { process.stderr.write(line + '\n'); } catch { /* ignore */ }
-  try {
-    if (!logReady) { ensureHome(); logReady = true; }
-    fs.appendFileSync(PATHS.serverLog, line + '\n');
-  } catch { /* ignore */ }
+  logBuf.push(line);
+  if (!logTimer) {
+    logTimer = setTimeout(() => { logTimer = null; flushLogs(); }, 500);
+    if (logTimer.unref) logTimer.unref();
+  }
 }
+// 退出前把未 flush 的日志落盘（process.on('exit') 内只允许同步操作，flushLogs 恰好同步）。
+try { process.on('exit', flushLogs); } catch { /* ignore */ }
 
 // ─────────────────────────────────────────────────────────── 时间工具（一律本地时间，防时区混淆 INV 一致性规则 6）
 const pad = (n) => String(n).padStart(2, '0');
@@ -111,7 +125,7 @@ export function readJsonArr(file) {
 export function writeJson(file, data) {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = file + '.tmp-' + process.pid;
+    const tmp = file + '.tmp-' + process.pid + '-' + crypto.randomBytes(4).toString('hex');
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
     fs.renameSync(tmp, file);
     return true;
@@ -203,6 +217,16 @@ export function runNode(scriptRelPath, args = [], opts = {}) {
       if (abortSignal.aborted) kill();
       else abortSignal.addEventListener('abort', kill, { once: true });
     }
+    // T4-5：请求带 progressToken 时，长任务期间周期性心跳，避免客户端 60s 超时掉线
+    const ctx = reqCtx.getStore();
+    let progressTimer = null;
+    if (ctx && ctx.progressToken && typeof ctx.sendProgress === 'function') {
+      const started = Date.now();
+      progressTimer = setInterval(() => {
+        try { ctx.sendProgress(ctx.progressToken, Date.now() - started, timeoutMs > 0 ? timeoutMs : undefined); } catch { /* ignore */ }
+      }, 5000);
+      if (progressTimer.unref) progressTimer.unref();
+    }
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -220,10 +244,12 @@ export function runNode(scriptRelPath, args = [], opts = {}) {
     }
     child.on('error', (e) => {
       if (timer) clearTimeout(timer);
+      if (progressTimer) clearInterval(progressTimer);
       resolve({ code: 1, stdout, stderr: stderr + '\n' + String(e.message), timedOut });
     });
     child.on('exit', (code, signal) => {
       if (timer) clearTimeout(timer);
+      if (progressTimer) clearInterval(progressTimer);
       resolve({ code: code == null ? 1 : code, stdout, stderr, timedOut, signal });
     });
   });

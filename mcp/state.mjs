@@ -115,6 +115,21 @@ export function touchIds() {
   for (const r of readTouch()) if (r && r.id !== undefined && r.id !== null) s.add(String(r.id));
   return s;
 }
+/** 一次读盘返回触达统计（避免多处各自 readTouch 重复解析 touch.json，T5-3）。 */
+export function readTouchStats() {
+  const rows = readTouch();
+  const today = todayStr();
+  const last7 = localDate(new Date(Date.now() - 6 * 86400000));
+  const ids = new Set();
+  let todayCount = 0, last7Count = 0;
+  for (const r of rows) {
+    const ts = String(r.ts || '');
+    if (ts.startsWith(today)) todayCount++;
+    if (ts.slice(0, 10) >= last7) last7Count++;
+    if (r && r.id !== undefined && r.id !== null) ids.add(String(r.id));
+  }
+  return { rows, today: todayCount, last_7d: last7Count, ids };
+}
 
 /**
  * 原子追加触达记录（跨进程锁内读-改-写，避免多 Host 并发丢记录 → 配额少计）。
@@ -128,9 +143,10 @@ export function commitTouch(records) {
     let added = 0;
     for (const rec of records) {
       const key = String((rec && (rec.id || rec.url)) || '');
-      if (key && seen.has(key)) continue;
+      if (!key) continue; // T5-5：无 id/url 的记录无法去重，拒绝写入
+      if (seen.has(key)) continue;
       all.push({ id: rec.id, name: rec.name, title: rec.title, direction: rec.direction, url: rec.url, ts: rec.ts || ts, status: rec.status || 'sent', job: rec.job, via: rec.via });
-      if (key) seen.add(key);
+      seen.add(key);
       added++;
     }
     writeJson(PATHS.touch, all);
@@ -229,8 +245,9 @@ export function findActiveLiveJob() {
 }
 /** 返回「最该被查看」的 job：优先活动 live，其次最近一个。 */
 export function findCurrentJob() {
-  const jobs = listJobs();
-  return findActiveLiveJob() || jobs[0] || null;
+  const jobs = listJobs(); // T5-3：一次 listJobs，避免再经 findActiveLiveJob 内部重复读盘
+  const active = jobs.find((j) => j.mode === 'live' && isActiveJob(j));
+  return active || jobs[0] || null;
 }
 
 // ─────────────────────────────────────────────────────────── plan 存取

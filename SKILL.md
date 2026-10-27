@@ -3,7 +3,7 @@ name: boss-hr-outreach-safe
 license: MIT
 github: https://github.com/shuaibiq6
 description: 联网操作 skill —— BOSS 直聘招聘端批量触达加固版。在通用浏览器自动化能力之上，内置招聘端限频档位 hr150（日 150 安全排班）、招聘方准入闸门与风控熔断。触发场景：招聘方主动触达候选人 / 批量打招呼 / 候选人筛选排序 / 简历获取，以及任何需要真实浏览器环境的联网任务（搜索、网页抓取、登录后操作、页面交互）。
-version: 2.10.0
+version: 2.11.0
 display_name: "BOSS 招聘触达 · 安全版"
 display_name_en: "BOSS HR Outreach (Safe)"
 description_zh: "BOSS 招聘端批量触达加固版：日 150 安全排班、准入闸门、风控熔断，CDP 直连本地浏览器"

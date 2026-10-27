@@ -251,6 +251,45 @@ console.log('\n== server 握手（initialize→tools/list→tools/call） ==');
   assert('resources/templates/list 返回 3 个模板', !!(tmpl && tmpl.result && Array.isArray(tmpl.result.resourceTemplates) && tmpl.result.resourceTemplates.length === 3), JSON.stringify(tmpl && tmpl.result));
 }
 
+console.log('\n== T4-4/T4-7/T5-4/T5-5 契约 ==');
+{
+  const transport = await import('../transport.mjs');
+  const prompts = await import('../prompts.js');
+  const resources = await import('../resources.js');
+
+  // T5-4 + T4-4：换行分隔 + 坏帧归集
+  const good = transport.decodeFrames(Buffer.from('{"a":1}\n{"b":2}\n'));
+  eq('decodeFrames 两条好帧', good.messages.length, 2);
+  eq('decodeFrames 无坏帧', good.badFrames.length, 0);
+  const bad = transport.decodeFrames(Buffer.from('not json\n{"ok":1}\n'));
+  eq('decodeFrames 坏帧计入 badFrames', bad.badFrames.length, 1);
+  eq('decodeFrames 坏帧后仍解析好帧', bad.messages.length, 1);
+  // Content-Length 回退仍工作
+  const body = JSON.stringify({ m: 1 });
+  const cl = transport.decodeFrames(Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`));
+  eq('decodeFrames Content-Length 回退', cl.messages.length, 1);
+
+  // T4-4：未知资源 → 抛 -32002
+  let rpcCode = null;
+  try { await resources.readResource('boss://no/such'); } catch (e) { rpcCode = e && e.rpcCode; }
+  eq('readResource 未知 URI→-32002', rpcCode, -32002);
+
+  // T4-7：剧本参数校验（防提示词注入）
+  const p1 = prompts.getPrompt('safe-batch-greet', { mode: 'live', profile: 'hr150<script>', limit: '5abc' });
+  const t1 = p1.messages[0].content.text;
+  assert('prompt mode=live 保留', t1.includes('mode=live'));
+  assert('prompt profile 注入被替换', t1.includes('hr150<script>') === false);
+  assert('prompt limit 注入被替换', t1.includes('5abc') === false);
+  assert('prompt 非 live 回落 dry', prompts.getPrompt('safe-batch-greet', { mode: 'evil' }).messages[0].content.text.includes('mode=dry'));
+  assert('prompt jobId 剥离非法字符', prompts.getPrompt('verify-and-report', { jobId: 'job-<x>_1' }).messages[0].content.text.includes('jobId=job-x_1'));
+
+  // T5-5：commitTouch 拒绝无 id/url 记录
+  const before = state.readTouch().length;
+  const res = state.commitTouch([{ name: '无键', title: 'x' }]);
+  eq('commitTouch 无键拒绝（added=0）', res.added, 0);
+  eq('commitTouch 无键不改变总量', state.readTouch().length, before);
+}
+
 // ─────────────────────────────────────────────────────────── 帧解析（供 server 握手）
 function parseFrame(buffer) {
   const s = buffer.toString('utf8');

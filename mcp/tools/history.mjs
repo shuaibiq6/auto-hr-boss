@@ -42,7 +42,7 @@ export const history = {
       const byDirection = {};
       const byJob = {};
       for (const r of rows) {
-        const d = String(r.direction || r.job || '');
+        const d = String(r.direction || ''); // T5-5：direction 缺失时不回退到 job，避免污染 by_direction
         if (d) byDirection[d] = (byDirection[d] || 0) + 1;
         const j = String(r.job || '');
         if (j) byJob[j] = (byJob[j] || 0) + 1;
